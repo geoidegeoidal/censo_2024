@@ -1,0 +1,7 @@
+# Datos grandes
+Cartografia_censo2024_Pais.gpkg
+Manzanas_Indicadores.gpkg
+
+# Python
+__pycache__/
+*.pyc
