@@ -54,16 +54,19 @@ def create_custom_legend(ax, gdf, column, scheme='FisherJenks', k=5):
             patch = mpatches.Patch(color=color, label=label)
             patches.append(patch)
             lower_bound = upper_bound
-            
-        legend = ax.legend(handles=patches, 
+        # Añadir leyenda al eje
+        # Usamos bbox_transform=ax.figure.transFigure para fijar la posición
+        # independientemente de la forma del mapa/ejes.
+        legend = ax.figure.legend(handles=patches, 
                   loc='lower center', 
-                  bbox_to_anchor=(0.5, -0.115), 
+                  bbox_to_anchor=(0.5, 0.05), # Posición fija en la figura (5% desde abajo)
                   ncol=k, 
                   frameon=False, 
                   fontsize=4.0, 
                   handlelength=0.8, 
                   handleheight=0.8,
-                  columnspacing=1.0
+                  bbox_transform=ax.figure.transFigure, # Coordenadas de figura (0-1)
+                  borderaxespad=0
                  )
         
         for text in legend.get_texts():
@@ -72,7 +75,7 @@ def create_custom_legend(ax, gdf, column, scheme='FisherJenks', k=5):
     except Exception as e:
         print(f"Error creating legend: {e}")
 
-def generate_commune_map(gdf, commune_name, column, title, filename):
+def generate_commune_map(gdf, commune_name, column, title, filename, description=""):
     print(f"  -> Generando mapa para {commune_name} ({column})...")
     
     commune_gdf = gdf[gdf['COMUNA'] == commune_name].copy()
@@ -103,9 +106,10 @@ def generate_commune_map(gdf, commune_name, column, title, filename):
     
     # Zoom
     minx, miny, maxx, maxy = commune_gdf_toplot.total_bounds
-    # Margen mínimo (Zoom ajustado)
+    # Margen mínimo (Zoom Maximo controlado)
     margin_x = (maxx - minx) * 0.01 
-    margin_y_top = (maxy - miny) * 0.1 
+    # Reducimos margen superior a 0.05 (más cerca del título, mapa más grande)
+    margin_y_top = (maxy - miny) * 0.05 
     margin_y_bottom = (maxy - miny) * 0.02 
     
     ax.set_xlim(minx - margin_x, maxx + margin_x)
@@ -123,6 +127,11 @@ def generate_commune_map(gdf, commune_name, column, title, filename):
     # 3. Variable (ELIMINADO a pedido del usuario)
     # plt.text(0.5, 0.84, f"Variable: {column}", transform=fig.transFigure,
     #          ha="center", fontsize=6, color=TEXT_COLOR, alpha=0.7)
+
+    # Descripción Breve del Indicador (Encima de la leyenda fija)
+    if description:
+        plt.text(0.5, 0.088, description, transform=fig.transFigure,
+                 ha="center", fontsize=5, fontweight='normal', color=TEXT_COLOR, alpha=0.9)
 
     # LEYENDA MANUAL
     create_custom_legend(ax, commune_gdf_toplot, column, k=5)
@@ -153,81 +162,111 @@ def generate_commune_map(gdf, commune_name, column, title, filename):
     plt.close()
     print(f"    Guardado: {out_path}")
 
-def assign_macrozone(region):
-    """Asigna macrozona basada en el nombre de la región"""
-    r = str(region).upper()
-    if any(x in r for x in ['ARICA', 'TARAPACA', 'ANTOFAGASTA']):
-        return 'Norte Grande'
-    elif any(x in r for x in ['ATACAMA', 'COQUIMBO']):
-        return 'Norte Chico'
-    elif any(x in r for x in ['VALPARAISO', 'METROPOLITANA', "O'HIGGINS", 'MAULE']):
-        return 'Zona Centro'
-    elif any(x in r for x in ['ÑUBLE', 'BIOBIO', 'ARAUCANIA', 'LOS RIOS', 'LOS LAGOS']):
-        return 'Zona Sur'
-    elif any(x in r for x in ['AYSEN', 'MAGALLANES']):
-        return 'Zona Austral'
-    return 'Otra'
+def assign_metro_area(commune):
+    """Asigna área metropolitana basada en la comuna"""
+    c = str(commune).upper().strip()
+    
+    # Gran Valparaíso
+    if c in ['VALPARAISO', 'VIÑA DEL MAR', 'CONCÓN', 'QUILPUÉ', 'VILLA ALEMANA']:
+        return 'Gran Valparaíso'
+        
+    # Gran Concepción
+    if c in ['CONCEPCIÓN', 'TALCAHUANO', 'CHIGUAYANTE', 'SAN PEDRO DE LA PAZ', 'HUALPÉN', 'PENCO', 'TOMÉ', 'CORONEL', 'LOTA', 'HUALQUI']:
+        return 'Gran Concepción'
+        
+    # Gran Santiago (34 comunas conurbadas aprox)
+    santiago_communes = [
+        'SANTIAGO', 'CERRILLOS', 'CERRO NAVIA', 'CONCHALÍ', 'EL BOSQUE', 'ESTACIÓN CENTRAL', 'HUECHURABA', 'INDEPENDENCIA', 
+        'LA CISTERNA', 'LA FLORIDA', 'LA GRANJA', 'LA PINTANA', 'LA REINA', 'LAS CONDES', 'LO BARNECHEA', 'LO ESPEJO', 
+        'LO PRADO', 'MACUL', 'MAIPÚ', 'ÑUÑOA', 'PEDRO AGUIRRE CERDA', 'PEÑALOLÉN', 'PROVIDENCIA', 'PUDAHUEL', 'QUILICURA', 
+        'QUINTA NORMAL', 'RECOLETA', 'RENCA', 'SAN JOAQUÍN', 'SAN MIGUEL', 'SAN RAMÓN', 'VITACURA', 'PUENTE ALTO', 'SAN BERNARDO'
+    ]
+    if c in santiago_communes:
+        return 'Gran Santiago'
+
+    return None
 
 def main():
     setup_plot()
     print(f"Cargando datos: {INPUT_FILE}...")
     gdf = gpd.read_file(INPUT_FILE)
     
-    # Mapas definidos (Nombre Columna, Titulo, Filename Short, Criterio 'Mal' Caso)
-    # Nota: Para analisis zonal queremos ambos extremos (Mejor y Peor)
-    indicadores = [
-        ('pct_internet', 'Brecha Digital', 'internet'),       
-        ('pct_hacinamiento', 'Hacinamiento Crítico', 'hacinamiento'),
-        ('pct_inmigrantes', 'Población Migrante', 'inmigrantes'),
-        ('pct_deficit_agua', 'Crisis Hídrica', 'agua'),
+    # Definición de indicadores con DESCRIPCIÓN BREVE
+    # (pct_col, titulo, archivo, descripcion, num_col, den_col)
+    indicadores_config = [
+        ('pct_internet', 'Brecha Digital', 'internet', '% Hogares con conexión fija', 'n_internet', 'n_hog'),       
+        ('pct_hacinamiento', 'Hacinamiento Crítico', 'hacinamiento', '% Viviendas con >2.5 personas/dorm.', 'n_viv_hacinadas', 'n_vp'),
+        ('pct_inmigrantes', 'Población Migrante', 'inmigrantes', '% Población nacida en el extranjero', 'n_inmigrantes', 'n_per'),
+        ('pct_deficit_agua', 'Crisis Hídrica', 'agua', '% Viviendas sin agua potable de red', 'pct_deficit_agua', None), 
     ]
+    
+    # Check para agua
+    cols_agua = ['n_fuente_agua_camion', 'n_fuente_agua_rio', 'n_fuente_agua_pozo']
+    has_agua_cols = all(c in gdf.columns for c in cols_agua)
 
-    print("Calculando estadísticas zonales...")
-    if 'COMUNA' not in gdf.columns or 'REGION' not in gdf.columns:
-        print("ERROR: Faltan columnas COMUNA o REGION.")
+    print("Calculando estadísticas metropolitanas PONDERADAS...")
+    if 'COMUNA' not in gdf.columns:
+        print("ERROR: Falta col COMUNA")
         return
 
-    # Agrupar por Comuna y Region para mantener la geografía
-    stats = gdf.groupby(['COMUNA', 'REGION'])[
-        ['pct_internet', 'pct_hacinamiento', 'pct_inmigrantes', 'pct_adulto_mayor', 'pct_deficit_agua']
-    ].mean().reset_index()
+    # 1. Agrupar sumarizando
+    agg_cols = ['n_internet', 'n_hog', 'n_viv_hacinadas', 'n_vp', 'n_inmigrantes', 'n_per']
+    if has_agua_cols: agg_cols += cols_agua
+    agg_cols = [c for c in agg_cols if c in gdf.columns]
     
-    # Asignar Macrozona
-    stats['MACROZONA'] = stats['REGION'].apply(assign_macrozone)
+    stats_raw = gdf.groupby(['COMUNA'])[agg_cols].sum().reset_index()
     
-    # Filtrar solo macrozonas validas
-    stats = stats[stats['MACROZONA'] != 'Otra']
+    # 2. Asignar Área Metro (Filtrado temprano mejor)
+    stats_raw['AREA_METRO'] = stats_raw['COMUNA'].apply(assign_metro_area)
+    stats = stats_raw.dropna(subset=['AREA_METRO']).copy()
     
-    for col, title, fname_base in indicadores:
-        print(f"Analizando: {title}...")
-        
-        # Por cada macrozona, sacar el Mejor y Peor caso
-        for zona in stats['MACROZONA'].unique():
-            df_zona = stats[stats['MACROZONA'] == zona]
-            if df_zona.empty: continue
-            
-            # Caso "Alto" (Max valor)
-            max_row = df_zona.loc[df_zona[col].idxmax()]
-            commune_max = max_row['COMUNA']
-            val_max = max_row[col]
-            
-            # Caso "Bajo" (Min valor)
-            min_row = df_zona.loc[df_zona[col].idxmin()]
-            commune_min = min_row['COMUNA']
-            val_min = min_row[col]
-            
-            print(f"  [{zona}]")
-            print(f"    -> Max: {commune_max} ({val_max:.1f}%)")
-            print(f"    -> Min: {commune_min} ({val_min:.1f}%)")
-            
-            # Generar mapas
-            # Sufijo zona para archivo
-            suffix_zona = zona.replace(' ', '')
-            
-            generate_commune_map(gdf, commune_max, col, title, f"{fname_base}_MAX_{suffix_zona}")
-            generate_commune_map(gdf, commune_min, col, title, f"{fname_base}_MIN_{suffix_zona}")
+    if stats.empty:
+        print("CRITICAL: Ninguna comuna matcheó con las listas de Áreas Metro. Revisa los nombres (acentos/mayúsculas).")
+        # Debug: imprimir algunas comunas del gdf
+        print("Muestra de comunas en GDF:", gdf['COMUNA'].unique()[:10])
+        return
 
-    print("¡Generación masiva finalizada!")
+    # 3. Calcular porcentajes
+    if 'n_internet' in stats and 'n_hog' in stats:
+        stats['pct_internet'] = (stats['n_internet'] / stats['n_hog']) * 100
+        
+    if 'n_viv_hacinadas' in stats and 'n_vp' in stats:
+        stats['pct_hacinamiento'] = (stats['n_viv_hacinadas'] / stats['n_vp']) * 100
+        
+    if 'n_inmigrantes' in stats and 'n_per' in stats:
+        stats['pct_inmigrantes'] = (stats['n_inmigrantes'] / stats['n_per']) * 100
+        
+    if has_agua_cols and 'n_vp' in stats:
+        stats['pct_deficit_agua'] = ((stats['n_fuente_agua_camion'] + stats['n_fuente_agua_rio'] + stats['n_fuente_agua_pozo']) / stats['n_vp']) * 100
+    else:
+         # Fallback simple si falta raw
+         print("WARN: Fallback promedio simple para agua en Metro Areas")
+         aux = gdf.groupby('COMUNA')['pct_deficit_agua'].mean().reset_index()
+         stats = stats.merge(aux, on='COMUNA', suffixes=('', '_simple'))
+         stats['pct_deficit_agua'] = stats['pct_deficit_agua'].fillna(stats['pct_deficit_agua_simple'])
+
+    print(f"Comunas analizadas: {len(stats)}")
+
+    # 4. Loop Generación
+    for col, title, fname_base, desc, _, _ in indicadores_config:
+        print(f"Analizando: {title}...")
+        if col not in stats.columns: continue
+
+        for area in stats['AREA_METRO'].unique():
+            df_area = stats[stats['AREA_METRO'] == area]
+            if df_area.empty: continue
+            
+            # Caso "Alto"
+            max_row = df_area.loc[df_area[col].idxmax()]
+            fname_max = f"{fname_base}_MAX_{area.replace(' ','')}"
+            generate_commune_map(gdf, max_row['COMUNA'], col, title, fname_max, desc)
+            
+            # Caso "Bajo"
+            min_row = df_area.loc[df_area[col].idxmin()]
+            fname_min = f"{fname_base}_MIN_{area.replace(' ','')}"
+            generate_commune_map(gdf, min_row['COMUNA'], col, title, fname_min, desc)
+
+    print("¡Generación metropolitana finalizada!")
 
 if __name__ == "__main__":
     main()

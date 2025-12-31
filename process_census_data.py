@@ -9,25 +9,32 @@ OUTPUT_FILE = 'Manzanas_Indicadores.gpkg'
 LAYER_NAME = 'Manzanas_CPV24' # O el nombre correcto de la capa de manzanas
 
 def process_data():
-    print(f"Leyendo archivo: {INPUT_FILE} (Esto puede tomar un momento...)")
+    print(f"Leyendo archivo: {INPUT_FILE}...")
     
-    # 1. Leer solo columnas necesarias para optimizar memoria
-    # Primero detectamos las columnas disponibles (opcional, pero buena práctica)
-    # Por simplicidad y "Keep it simple", leemos y luego filtramos, 
-    # pero para archivos grandes es mejor leer solo lo necesario si el driver lo permite.
-    # Dado que es geopandas, a veces lee todo. Intentaremos optimizar post-lectura inmediato.
+    layers = ['Manzanas_CPV24', 'Entidades_CPV24']
+    gdfs = []
     
-    try:
-        # Intentamos leer solo filas validas con SQL filter si fiona lo soporta en esta version
-        # MZ_BASE_CENSO = 1 son las manzanas con datos estadisticos validos
-        gdf = gpd.read_file(INPUT_FILE, layer=LAYER_NAME, where="MZ_BASE_CENSO = 1")
-    except TypeError:
-        # Fallback si 'where' no es soportado por la version de geopandas/fiona instalada
-        print("Filtro SQL no soportado directamente, leyendo todo y filtrando en pandas...")
-        gdf = gpd.read_file(INPUT_FILE, layer=LAYER_NAME)
-        gdf = gdf[gdf['MZ_BASE_CENSO'] == 1].copy()
+    for layer in layers:
+        print(f"  > Leyendo capa: {layer}...")
+        try:
+            # Intentar filtro SQL simple para optimizar
+            # Asumimos que amblas capas tienen MZ_BASE_CENSO o equivalente para filtrar validez
+            # En entidades a veces todas son validas, pero aplicamos el filtro por consistencia si existe la columna
+            # Si falla, leemos todo y concatenamos.
+            temp_gdf = gpd.read_file(INPUT_FILE, layer=layer)
+            if 'MZ_BASE_CENSO' in temp_gdf.columns:
+                 temp_gdf = temp_gdf[temp_gdf['MZ_BASE_CENSO'] == 1]
+            gdfs.append(temp_gdf)
+        except Exception as e:
+            print(f"    Error leyendo {layer}: {e}")
+            
+    if not gdfs:
+        print("CRITICAL: No se pudo cargar ninguna capa.")
+        return
 
-    print(f"Registros cargados: {len(gdf)}")
+    print("Fusionando capas urbana (Manzanas) y rural (Entidades)...")
+    gdf = pd.concat(gdfs, ignore_index=True)
+    print(f"Total registros cargados: {len(gdf)}")
 
     # 2. Manejo de Nulos en Indicadores
     # Las columnas n_* pueden venir como NaN si fueron suprimidas. Reemplazamos por 0 para calculos agregados,
@@ -75,13 +82,18 @@ def process_data():
 
     # 4. Limpieza Final y Exportación
     # Seleccionamos solo columnas relevantes para el mapa ligero
+    # IMPORTANTE: Incluimos las columnas 'n_...' raw para poder recalcular 
+    # promedios ponderados por comuna en el script de visualización.
     keep_cols = [
         'MANZENT', 'CUT', 'REGION', 'PROVINCIA', 'COMUNA',  # Identificadores
-        'geometry',                                         # Poligonos
-        'n_per', 'n_vp',                                    # Totales absolutos utiles
+        'geometry', 'MZ_BASE_CENSO',                        # Geometria y filtro
+        'n_per', 'n_vp', 'n_hog',                           # Universos
         'pct_adulto_mayor', 'pct_infancia', 'pct_inmigrantes', 
         'pct_hacinamiento', 'pct_deficit_agua', 'pct_lena', 
-        'pct_internet'
+        'pct_internet',
+        # Variables base para ponderación
+        'n_internet', 'n_viv_hacinadas', 'n_inmigrantes',
+        'n_fuente_agua_camion', 'n_fuente_agua_rio', 'n_fuente_agua_pozo'
     ]
     
     # Filtrar solo columnas que existen (por si acaso algun ID geogrfico tiene otro nombre)
