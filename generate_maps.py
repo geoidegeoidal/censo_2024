@@ -4,12 +4,13 @@ import matplotlib.patches as mpatches
 import os
 from matplotlib.colors import ListedColormap
 import mapclassify
+import contextily as cx # Librería necesaria para el mapa base
 
-# Configuración
+# --- CONFIGURACIÓN ---
 INPUT_FILE = 'Manzanas_Indicadores.gpkg'
-OUTPUT_DIR = 'mapas_finales_instagram' # Nombre final carpeta
+OUTPUT_DIR = 'mapas_finales_instagram'
 DPI = 300
-FIG_SIZE = (3.6, 3.6) # 1080x1080 px
+FIG_SIZE = (3.6, 3.6) # Formato cuadrado para IG (1080x1080 px aprox)
 
 # Estilo Neon Dark High Contrast
 BACKGROUND_COLOR = '#111111' 
@@ -20,15 +21,17 @@ NEON_COLORS = ['#3d0859', '#7f0e8f', '#cf326e', '#fa8146', '#fce82e']
 NEON_CMAP = ListedColormap(NEON_COLORS)
 
 def setup_plot():
+    """Configura el estilo global de matplotlib"""
     plt.style.use('dark_background')
     plt.rcParams['font.family'] = 'sans-serif'
+    # Intenta usar fuentes modernas si están disponibles
     plt.rcParams['font.sans-serif'] = ['Bahnschrift', 'Arial Narrow', 'Arial', 'DejaVu Sans']
     plt.rcParams['axes.facecolor'] = BACKGROUND_COLOR
     plt.rcParams['figure.facecolor'] = BACKGROUND_COLOR
     plt.rcParams['text.color'] = TEXT_COLOR
 
 def create_custom_legend(ax, gdf, column, scheme='FisherJenks', k=5):
-    """Crea una leyenda discreta manual aesthetic"""
+    """Crea una leyenda discreta manual y estética"""
     try:
         valid_data = gdf[column].dropna()
         if valid_data.empty: return
@@ -50,24 +53,25 @@ def create_custom_legend(ax, gdf, column, scheme='FisherJenks', k=5):
         for i, upper_bound in enumerate(bins):
             if str(upper_bound) == 'nan': continue
             color = current_colors[i] if i < len(current_colors) else NEON_COLORS[-1]
+            # Formato de etiqueta
             label = f"{int(lower_bound)} - {int(upper_bound)}%"
             patch = mpatches.Patch(color=color, label=label)
             patches.append(patch)
             lower_bound = upper_bound
-        # Añadir leyenda al eje
-        # Usamos bbox_transform=ax.figure.transFigure para fijar la posición
-        # independientemente de la forma del mapa/ejes.
-        legend = ax.figure.legend(handles=patches, 
-                  loc='lower center', 
-                  bbox_to_anchor=(0.5, 0.05), # Posición fija en la figura (5% desde abajo)
-                  ncol=k, 
-                  frameon=False, 
-                  fontsize=4.0, 
-                  handlelength=0.8, 
-                  handleheight=0.8,
-                  bbox_transform=ax.figure.transFigure, # Coordenadas de figura (0-1)
-                  borderaxespad=0
-                 )
+
+        # Añadir leyenda
+        legend = ax.figure.legend(
+            handles=patches, 
+            loc='lower center', 
+            bbox_to_anchor=(0.5, 0.05), # Posición fija
+            ncol=k, 
+            frameon=False, 
+            fontsize=4.0, 
+            handlelength=0.8, 
+            handleheight=0.8,
+            bbox_transform=ax.figure.transFigure,
+            borderaxespad=0
+        )
         
         for text in legend.get_texts():
             text.set_color(TEXT_COLOR)
@@ -76,16 +80,18 @@ def create_custom_legend(ax, gdf, column, scheme='FisherJenks', k=5):
         print(f"Error creating legend: {e}")
 
 def generate_commune_map(gdf, commune_name, column, title, filename, description=""):
+    """Genera y guarda el mapa estático con estilo Neon y Basemap"""
     print(f"  -> Generando mapa para {commune_name} ({column})...")
     
     commune_gdf = gdf[gdf['COMUNA'] == commune_name].copy()
     if commune_gdf.empty: return
 
+    # CRUCIAL: Convertir a Web Mercator (EPSG:3857) para Contextily
     commune_gdf_toplot = commune_gdf.to_crs(epsg=3857)
 
     fig, ax = plt.subplots(figsize=FIG_SIZE)
     
-    # Plot Discreto
+    # 1. PLOT DE DATOS (Capa Superior - Zorder 2)
     try:
         commune_gdf_toplot.plot(
             column=column,
@@ -94,71 +100,79 @@ def generate_commune_map(gdf, commune_name, column, title, filename, description
             scheme='FisherJenks', 
             k=5,
             legend=False, 
-            alpha=1.0, # Opacidad total (100%)
-            edgecolor='none' 
+            alpha=0.6,          # Transparencia para ver el mapa base debajo
+            edgecolor='#ffffff',# Borde blanco fino para efecto neon
+            linewidth=0.1,      # Grosor del borde
+            zorder=2            # IMPORTANTE: Dibuja esto ENCIMA del mapa base
         )
     except Exception as e:
         print(f"Fallback to continuous plot: {e}")
-        commune_gdf_toplot.plot(column=column, ax=ax, cmap=NEON_CMAP, legend=False, alpha=1.0)
+        commune_gdf_toplot.plot(column=column, ax=ax, cmap=NEON_CMAP, legend=False, alpha=0.6, zorder=2)
 
-    # Fondo Sólido Oscuro
+    # 2. AÑADIR MAPA BASE (Capa Inferior - Zorder 1)
+    try:
+        # Usamos DarkMatterNoLabels para que sea limpio (sin nombres de calles que molesten)
+        cx.add_basemap(
+            ax, 
+            crs=commune_gdf_toplot.crs.to_string(), 
+            source=cx.providers.CartoDB.DarkMatterNoLabels, 
+            attribution=False,
+            zorder=1 # IMPORTANTE: Dibuja esto DEBAJO de los datos
+        )
+    except Exception as e:
+        print(f"    WARN: No se pudo añadir basemap (Check internet connection): {e}")
+
+    # Fondo de seguridad (por si falla el basemap)
     ax.set_facecolor(BACKGROUND_COLOR)
     
-    # Zoom
+    # 3. AJUSTE DE ZOOM
     minx, miny, maxx, maxy = commune_gdf_toplot.total_bounds
-    # Margen mínimo (Zoom Maximo controlado)
-    margin_x = (maxx - minx) * 0.01 
-    # Reducimos margen superior a 0.05 (más cerca del título, mapa más grande)
-    margin_y_top = (maxy - miny) * 0.05 
-    margin_y_bottom = (maxy - miny) * 0.02 
+    margin_x = (maxx - minx) * 0.1 # 10% de margen
+    margin_y_top = (maxy - miny) * 0.2
+    margin_y_bottom = (maxy - miny) * 0.2 
     
     ax.set_xlim(minx - margin_x, maxx + margin_x)
     ax.set_ylim(miny - margin_y_bottom, maxy + margin_y_top)
 
-    # TITULOS (Mayor espaciado vertical)
-    # 1. Título principal (Arriba)
+    # 4. TITULOS Y TEXTOS
+    # Título principal
     plt.text(0.5, 0.94, title.upper(), transform=fig.transFigure, 
              ha="center", fontsize=16, fontweight='bold', color=TEXT_COLOR)
     
-    # 2. Nombre Comuna (Separado del título)
+    # Subtítulo (Nombre Comuna)
     plt.text(0.5, 0.88, commune_name, transform=fig.transFigure,
              ha="center", fontsize=14, fontweight='light', color=TEXT_COLOR)
 
-    # 3. Variable (ELIMINADO a pedido del usuario)
-    # plt.text(0.5, 0.84, f"Variable: {column}", transform=fig.transFigure,
-    #          ha="center", fontsize=6, color=TEXT_COLOR, alpha=0.7)
-
-    # Descripción Breve del Indicador (Encima de la leyenda fija)
+    # Descripción
     if description:
         plt.text(0.5, 0.088, description, transform=fig.transFigure,
                  ha="center", fontsize=5, fontweight='normal', color=TEXT_COLOR, alpha=0.9)
 
-    # LEYENDA MANUAL
+    # Leyenda
     create_custom_legend(ax, commune_gdf_toplot, column, k=5)
 
-    # Fuente (Abajo bien al borde)
+    # Fuente
     plt.text(0.5, 0.010, "Fuente: INE - Censo 2024 • @conmapas", transform=fig.transFigure,
              ha="center", fontsize=4, color=TEXT_COLOR, alpha=0.5)
 
-    # Logo Marca de Agua (Esquina Inferior Derecha)
+    # Logo (Opcional)
     try:
         if os.path.exists('conmapas.png'):
             logo = plt.imread('conmapas.png')
-            # [left, bottom, width, height] en coordenadas de figura (0-1)
-            # Ajustado para esquina inferior derecha
+            # [left, bottom, width, height]
             logo_ax = fig.add_axes([0.88, 0.02, 0.1, 0.1], zorder=10)
             logo_ax.imshow(logo)
             logo_ax.axis('off')
     except Exception as e:
-        print(f"    WARN: No se pudo cargar el logo: {e}")
+        pass
 
     ax.set_axis_off()
     
     if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
     out_path = os.path.join(OUTPUT_DIR, f"{filename}_{commune_name}.png")
     
-    # Guardar EXACTO
-    plt.savefig(out_path, dpi=DPI, facecolor=BACKGROUND_COLOR)
+    # Guardar
+    plt.savefig(out_path, dpi=DPI, facecolor=BACKGROUND_COLOR, bbox_inches='tight', pad_inches=0)
     plt.close()
     print(f"    Guardado: {out_path}")
 
@@ -174,7 +188,7 @@ def assign_metro_area(commune):
     if c in ['CONCEPCIÓN', 'TALCAHUANO', 'CHIGUAYANTE', 'SAN PEDRO DE LA PAZ', 'HUALPÉN', 'PENCO', 'TOMÉ', 'CORONEL', 'LOTA', 'HUALQUI']:
         return 'Gran Concepción'
         
-    # Gran Santiago (34 comunas conurbadas aprox)
+    # Gran Santiago
     santiago_communes = [
         'SANTIAGO', 'CERRILLOS', 'CERRO NAVIA', 'CONCHALÍ', 'EL BOSQUE', 'ESTACIÓN CENTRAL', 'HUECHURABA', 'INDEPENDENCIA', 
         'LA CISTERNA', 'LA FLORIDA', 'LA GRANJA', 'LA PINTANA', 'LA REINA', 'LAS CONDES', 'LO BARNECHEA', 'LO ESPEJO', 
@@ -189,10 +203,15 @@ def assign_metro_area(commune):
 def main():
     setup_plot()
     print(f"Cargando datos: {INPUT_FILE}...")
+    
+    # Verificación simple de archivo
+    if not os.path.exists(INPUT_FILE):
+        print(f"ERROR: No se encuentra el archivo '{INPUT_FILE}'. Verifica la ruta.")
+        return
+
     gdf = gpd.read_file(INPUT_FILE)
     
-    # Definición de indicadores con DESCRIPCIÓN BREVE
-    # (pct_col, titulo, archivo, descripcion, num_col, den_col)
+    # Definición de indicadores
     indicadores_config = [
         ('pct_internet', 'Brecha Digital', 'internet', '% Hogares con conexión fija', 'n_internet', 'n_hog'),       
         ('pct_hacinamiento', 'Hacinamiento Crítico', 'hacinamiento', '% Viviendas con >2.5 personas/dorm.', 'n_viv_hacinadas', 'n_vp'),
@@ -204,9 +223,9 @@ def main():
     cols_agua = ['n_fuente_agua_camion', 'n_fuente_agua_rio', 'n_fuente_agua_pozo']
     has_agua_cols = all(c in gdf.columns for c in cols_agua)
 
-    print("Calculando estadísticas metropolitanas PONDERADAS...")
+    print("Calculando estadísticas metropolitanas...")
     if 'COMUNA' not in gdf.columns:
-        print("ERROR: Falta col COMUNA")
+        print("ERROR: Falta columna COMUNA en el archivo.")
         return
 
     # 1. Agrupar sumarizando
@@ -216,14 +235,12 @@ def main():
     
     stats_raw = gdf.groupby(['COMUNA'])[agg_cols].sum().reset_index()
     
-    # 2. Asignar Área Metro (Filtrado temprano mejor)
+    # 2. Asignar Área Metro
     stats_raw['AREA_METRO'] = stats_raw['COMUNA'].apply(assign_metro_area)
     stats = stats_raw.dropna(subset=['AREA_METRO']).copy()
     
     if stats.empty:
-        print("CRITICAL: Ninguna comuna matcheó con las listas de Áreas Metro. Revisa los nombres (acentos/mayúsculas).")
-        # Debug: imprimir algunas comunas del gdf
-        print("Muestra de comunas en GDF:", gdf['COMUNA'].unique()[:10])
+        print("CRITICAL: Ninguna comuna matcheó con las listas de Áreas Metro.")
         return
 
     # 3. Calcular porcentajes
@@ -239,8 +256,8 @@ def main():
     if has_agua_cols and 'n_vp' in stats:
         stats['pct_deficit_agua'] = ((stats['n_fuente_agua_camion'] + stats['n_fuente_agua_rio'] + stats['n_fuente_agua_pozo']) / stats['n_vp']) * 100
     else:
-         # Fallback simple si falta raw
-         print("WARN: Fallback promedio simple para agua en Metro Areas")
+         # Fallback simple
+         print("WARN: Fallback promedio simple para agua")
          aux = gdf.groupby('COMUNA')['pct_deficit_agua'].mean().reset_index()
          stats = stats.merge(aux, on='COMUNA', suffixes=('', '_simple'))
          stats['pct_deficit_agua'] = stats['pct_deficit_agua'].fillna(stats['pct_deficit_agua_simple'])
@@ -249,24 +266,27 @@ def main():
 
     # 4. Loop Generación
     for col, title, fname_base, desc, _, _ in indicadores_config:
-        print(f"Analizando: {title}...")
-        if col not in stats.columns: continue
+        if col not in stats.columns: 
+            print(f"Saltando {col} (no existe en datos)")
+            continue
+        
+        print(f"Analizando indicador: {title}...")
 
         for area in stats['AREA_METRO'].unique():
             df_area = stats[stats['AREA_METRO'] == area]
             if df_area.empty: continue
             
-            # Caso "Alto"
+            # Caso "Alto" (Máximo valor)
             max_row = df_area.loc[df_area[col].idxmax()]
             fname_max = f"{fname_base}_MAX_{area.replace(' ','')}"
             generate_commune_map(gdf, max_row['COMUNA'], col, title, fname_max, desc)
             
-            # Caso "Bajo"
+            # Caso "Bajo" (Mínimo valor)
             min_row = df_area.loc[df_area[col].idxmin()]
             fname_min = f"{fname_base}_MIN_{area.replace(' ','')}"
             generate_commune_map(gdf, min_row['COMUNA'], col, title, fname_min, desc)
 
-    print("¡Generación metropolitana finalizada!")
+    print("¡Generación finalizada con éxito!")
 
 if __name__ == "__main__":
     main()
