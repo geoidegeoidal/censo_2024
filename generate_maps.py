@@ -216,7 +216,11 @@ def main():
         ('pct_internet', 'Brecha Digital', 'internet', '% Hogares con conexión fija', 'n_internet', 'n_hog'),       
         ('pct_hacinamiento', 'Hacinamiento Crítico', 'hacinamiento', '% Viviendas con >2.5 personas/dorm.', 'n_viv_hacinadas', 'n_vp'),
         ('pct_inmigrantes', 'Población Migrante', 'inmigrantes', '% Población nacida en el extranjero', 'n_inmigrantes', 'n_per'),
-        ('pct_deficit_agua', 'Crisis Hídrica', 'agua', '% Viviendas sin agua potable de red', 'pct_deficit_agua', None), 
+        ('pct_deficit_agua', 'Crisis Hídrica', 'agua', '% Viviendas sin agua potable de red', 'pct_deficit_agua', None),
+        ('pct_alone', 'Forever Alone', 'forever_alone', '% Hogares unipersonales', 'n_hog_unipersonales', 'n_hog'),
+        ('pct_ciclistas', 'Ciclistas Furiosos', 'ciclistas', '% Personas que van al trabajo en bicicleta', 'n_transporte_bicicleta', 'n_per'),
+        ('pct_hipotecados', 'Hipotecados hasta el cuello', 'hipotecados', '% Hogares con vivienda pagándose', 'n_tenencia_propia_pagandose', 'n_hog'),
+        ('pct_ex', 'El Club de los Ex', 'club_ex', '% Personas divorciadas, separadas o anuladas', 'n_estcivcon_anul_sep_div', 'n_per'),
     ]
     
     # Check para agua
@@ -229,7 +233,8 @@ def main():
         return
 
     # 1. Agrupar sumarizando
-    agg_cols = ['n_internet', 'n_hog', 'n_viv_hacinadas', 'n_vp', 'n_inmigrantes', 'n_per']
+    agg_cols = ['n_internet', 'n_hog', 'n_viv_hacinadas', 'n_vp', 'n_inmigrantes', 'n_per', 
+                'n_hog_unipersonales', 'n_transporte_bicicleta', 'n_tenencia_propia_pagandose', 'n_estcivcon_anul_sep_div']
     if has_agua_cols: agg_cols += cols_agua
     agg_cols = [c for c in agg_cols if c in gdf.columns]
     
@@ -261,6 +266,18 @@ def main():
          aux = gdf.groupby('COMUNA')['pct_deficit_agua'].mean().reset_index()
          stats = stats.merge(aux, on='COMUNA', suffixes=('', '_simple'))
          stats['pct_deficit_agua'] = stats['pct_deficit_agua'].fillna(stats['pct_deficit_agua_simple'])
+
+    if 'n_hog_unipersonales' in stats and 'n_hog' in stats:
+        stats['pct_alone'] = (stats['n_hog_unipersonales'] / stats['n_hog']) * 100
+
+    if 'n_transporte_bicicleta' in stats and 'n_per' in stats: # Usamos n_per como denominador general
+        stats['pct_ciclistas'] = (stats['n_transporte_bicicleta'] / stats['n_per']) * 100
+
+    if 'n_tenencia_propia_pagandose' in stats and 'n_hog' in stats:
+        stats['pct_hipotecados'] = (stats['n_tenencia_propia_pagandose'] / stats['n_hog']) * 100
+
+    if 'n_estcivcon_anul_sep_div' in stats and 'n_per' in stats:
+        stats['pct_ex'] = (stats['n_estcivcon_anul_sep_div'] / stats['n_per']) * 100
 
     print(f"Comunas analizadas: {len(stats)}")
 

@@ -93,7 +93,11 @@ def process_data():
         'pct_internet',
         # Variables base para ponderación
         'n_internet', 'n_viv_hacinadas', 'n_inmigrantes',
-        'n_fuente_agua_camion', 'n_fuente_agua_rio', 'n_fuente_agua_pozo'
+        'n_fuente_agua_camion', 'n_fuente_agua_rio', 'n_fuente_agua_pozo',
+        'n_hog_unipersonales', # Para indicador Forever Alone
+        'n_transporte_bicicleta', # Para Ciclistas Furiosos
+        'n_tenencia_propia_pagandose', # Para Hipotecados
+        'n_estcivcon_anul_sep_div' # Para Club de los Ex
     ]
     
     # Filtrar solo columnas que existen (por si acaso algun ID geogrfico tiene otro nombre)
