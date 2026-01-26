@@ -69,8 +69,8 @@ def create_custom_legend(ax, gdf, column, scheme='FisherJenks', k=5, bins=None, 
         for i, upper_bound in enumerate(bins):
             if str(upper_bound) == 'nan': continue
             color = current_colors[i] 
-            # Formato de etiqueta limpio (solo numeros)
-            label = f"{int(lower_bound)} - {int(upper_bound)}"
+            # Formato de etiqueta con porcentaje
+            label = f"{int(lower_bound)}% - {int(upper_bound)}%"
             patch = mpatches.Patch(color=color, label=label)
             patches.append(patch)
             lower_bound = upper_bound
@@ -555,6 +555,10 @@ def main():
 
     gdf = gpd.read_file(INPUT_FILE)
     
+    # Limpieza de duplicados por si acaso
+    gdf = gdf.loc[:,~gdf.columns.duplicated()]
+    print(f"  Columnas cargadas: {len(gdf.columns)}")
+    
     # --- FILTRO REGION METROPOLITANA ---
     # Filtrar por substring para evitar problemas de encoding exacto
     if 'REGION' in gdf.columns:
@@ -583,6 +587,10 @@ def main():
         ('idx_precariedad_hab', 'Precariedad Habitacional', 'precariedad_hab', 'Variables: Hacinamiento, Allegamiento, Calidad Viv., Saneamiento, Tenencia Inf.', 'n_viv_hacinadas', 'n_vp'),
         ('idx_vulnerabilidad_soc', 'Vulnerabilidad Social', 'vulnerabilidad_soc', 'Variables: Desempleo, Analfabetismo, Brecha Digital, Jefatura Fem.', 'n_desocupado', 'n_per'),
         ('idx_privilegio', 'Cuestiona tus privilegios perro', 'cuestiona_privilegios', 'Variables: Educ. Sup., Auto, Casa Pagada, Internet Fija, Alto Estándar, Espacio', 'n_cine_terciaria_maestria_doctorado', 'n_per'),
+        # Indicador simple: Soltería
+        ('pct_soltero', 'Aún Sin Anillo 💍', 'aun_sin_anillo', 'Porcentaje de personas solteras (nunca casadas ni en unión)', 'n_estcivcon_soltero', 'n_per'),
+        # Indicador simple: Hacinamiento
+        ('pct_hacinamiento', 'Dormitorio Compartido 🛏️', 'dormitorio_compartido', 'Porcentaje de viviendas con hacinamiento', 'n_viv_hacinadas', 'n_vp_ocupada'),
     ]
     
     # Check para agua (Legacy, se puede ignorar si no se usa)
@@ -613,6 +621,27 @@ def main():
          # Eliminamos pct_hotel_mama
          pass
     
+    # Solteros (Aún Sin Anillo) - nivel manzana (Denominador corregido: Suma Status Civil)
+    # Si no tenemos todas las columnas de estado civil, usamos n_per como fallback (aunque es imperfecto)
+    civ_cols = ['n_estcivcon_casado', 'n_estcivcon_conviviente', 'n_estcivcon_conv_civil', 
+                'n_estcivcon_anul_sep_div', 'n_estcivcon_viudo', 'n_estcivcon_soltero']
+    
+    if all(c in gdf.columns for c in civ_cols):
+        denom_civ = gdf[civ_cols].sum(axis=1).replace(0, 1) # Evitar div por cero
+        gdf['pct_soltero'] = (gdf['n_estcivcon_soltero'] / denom_civ) * 100
+    elif 'n_estcivcon_soltero' in gdf and 'n_per' in gdf:
+         gdf['pct_soltero'] = (gdf['n_estcivcon_soltero'] / gdf['n_per']) * 100
+
+    # Hacinamiento (Dormitorio Compartido) - nivel manzana (Denominador: n_vp_ocupada)
+    if 'n_viv_hacinadas' in gdf:
+        if 'n_vp_ocupada' in gdf:
+             denom_viv = gdf['n_vp_ocupada'].replace(0, 1)
+        elif 'n_vp' in gdf:
+             denom_viv = gdf['n_vp'].replace(0, 1) # Fallback
+        else: denom_viv = 1
+        
+        gdf['pct_hacinamiento'] = (gdf['n_viv_hacinadas'] / denom_viv) * 100
+    
     # Rellenar indices compuestos si vienen nulos (ya calculados en process)
     if 'idx_precariedad_hab' in gdf.columns:
         gdf['idx_precariedad_hab'] = gdf['idx_precariedad_hab'].fillna(0)
@@ -640,9 +669,17 @@ def main():
                 # Privilegio
                 'n_cine_terciaria_maestria_doctorado', 'n_transporte_auto', 'n_tenencia_propia_pagada',
                 'n_serv_internet_fija', 'n_serv_compu', 
-                'n_dormitorios_4', 'n_dormitorios_5', 'n_dormitorios_6_o_mas'
+                'n_dormitorios_4', 'n_dormitorios_5', 'n_dormitorios_6_o_mas',
+                # Soltería (todas las columnas de estado civil para denominador correcto)
+                'n_estcivcon_soltero', 'n_estcivcon_casado', 'n_estcivcon_conviviente',
+                'n_estcivcon_conv_civil', 'n_estcivcon_viudo',
+                # Hacinamiento (n_viv_hacinadas ya está arriba en Precariedad, no duplicar)
+                # Viviendas Ocupadas
+                'n_vp_ocupada'
                 ]
     
+    # IMPORTANTE: Asegurar que no hay duplicados en agg_cols
+    agg_cols = list(dict.fromkeys(agg_cols))  # Preserva orden, elimina duplicados
     agg_cols = [c for c in agg_cols if c in gdf.columns]
     
     stats_raw = gdf.groupby(['COMUNA'])[agg_cols].sum().reset_index()
@@ -673,6 +710,32 @@ def main():
 
     if 'n_estcivcon_anul_sep_div' in stats and 'n_per' in stats:
         stats['pct_ex'] = (stats['n_estcivcon_anul_sep_div'] / stats['n_per']) * 100
+
+    # Solteros (Aún Sin Anillo)
+    civ_cols_agg = ['n_estcivcon_casado', 'n_estcivcon_conviviente', 'n_estcivcon_conv_civil', 
+                    'n_estcivcon_anul_sep_div', 'n_estcivcon_viudo', 'n_estcivcon_soltero']
+    
+    if all(c in stats for c in civ_cols_agg):
+         denom_civ_agg = stats[civ_cols_agg].sum(axis=1).replace(0, 1)
+         stats['pct_soltero'] = (stats['n_estcivcon_soltero'] / denom_civ_agg) * 100
+    elif 'n_estcivcon_soltero' in stats and 'n_per' in stats:
+        stats['pct_soltero'] = (stats['n_estcivcon_soltero'] / stats['n_per']) * 100
+
+    # Hacinamiento (Dormitorio Compartido)
+    if 'n_viv_hacinadas' in stats:
+        if 'n_vp_ocupada' in stats: denom_viv_agg = stats['n_vp_ocupada'].replace(0, 1)
+        elif 'n_vp' in stats: denom_viv_agg = stats['n_vp'].replace(0, 1)
+        else: denom_viv_agg = 1
+        
+        # Usamos .values para asegurar que no intente alinear índices si hay duplicados
+        val_numer = stats['n_viv_hacinadas']
+        val_denom = denom_viv_agg if isinstance(denom_viv_agg, (int, float)) else denom_viv_agg
+        
+        # Si es serie, asegurar tipos
+        if hasattr(val_denom, 'values'):
+             stats['pct_hacinamiento'] = (val_numer.values / val_denom.values) * 100
+        else:
+             stats['pct_hacinamiento'] = (val_numer / val_denom) * 100
 
     # RECALCULO DE ÍNDICES COMPUESTOS A NIVEL COMUNAL (Z-SCORES) --
     
@@ -713,12 +776,15 @@ def main():
         if series.max() == series.min(): return series * 0
         return ((series - series.min()) / (series.max() - series.min())) * 100
 
-    stats['idx_precariedad_hab'] = minmax_scale((
-        z_score_stats(p_hacinamiento) + z_score_stats(p_allegamiento) +
-        z_score_stats(p_irrecuperable) + z_score_stats(p_mediagua) +
-        z_score_stats(p_mat_precari) + z_score_stats(p_saneamiento) +
-        z_score_stats(p_sin_contrato) + z_score_stats(p_cedida)
-    ) / 8.0)
+    # ÍNDICES COMPUESTOS: Promedio simple de porcentajes reales (no MinMax relativo)
+    # Esto evita que el máximo siempre sea 100% y muestra valores interpretables
+    
+    stats['idx_precariedad_hab'] = (
+        p_hacinamiento + p_allegamiento +
+        p_irrecuperable + p_mediagua +
+        p_mat_precari + p_saneamiento +
+        p_sin_contrato + p_cedida
+    ) / 8.0
 
     # --- Vulnerabilidad Social ---
     p_analfabeto = calc_pct_stats('n_analfabet', 'n_per')
@@ -734,10 +800,10 @@ def main():
         p_sin_internet = 100 - pct_internet
     else: p_sin_internet = 0
         
-    stats['idx_vulnerabilidad_soc'] = minmax_scale((
-        z_score_stats(p_desempleo) + z_score_stats(p_analfabeto) + 
-        z_score_stats(p_sin_internet) + z_score_stats(p_jefa)
-    ) / 4.0)
+    stats['idx_vulnerabilidad_soc'] = (
+        p_desempleo + p_analfabeto + 
+        p_sin_internet + p_jefa
+    ) / 4.0
 
     # --- Privilegio ---
     p_profesional = calc_pct_stats('n_cine_terciaria_maestria_doctorado', 'n_per')
@@ -751,14 +817,14 @@ def main():
         if c in stats: esp_sum += calc_pct_stats(c, 'n_vp')
     p_espacio = esp_sum
 
-    stats['idx_privilegio'] = minmax_scale((
-        z_score_stats(p_profesional) +
-        z_score_stats(p_propia_pagada) +
-        z_score_stats(p_auto) +
-        z_score_stats(p_int_fija) +
-        z_score_stats(p_computador) +
-        z_score_stats(p_espacio)
-    ) / 6.0)
+    stats['idx_privilegio'] = (
+        p_profesional +
+        p_propia_pagada +
+        p_auto +
+        p_int_fija +
+        p_computador +
+        p_espacio
+    ) / 6.0
 
 
 
@@ -772,7 +838,10 @@ def main():
             print(f"Saltando {col} (no existe en datos)")
             continue
         
-        print(f"Analizando indicador: {title}...")
+        try:
+            print(f"Analizando indicador: {title.encode('cp1252', 'replace').decode('cp1252')}...")
+        except:
+             print(f"Analizando indicador: {col}...")
 
         # 4.1 Filter Urban Only within the stats (if possible) or just for the Jenks calculation?
         # User said: "concentrate en el urbano".

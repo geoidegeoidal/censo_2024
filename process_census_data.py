@@ -228,6 +228,7 @@ def process_data():
         'MANZENT', 'CUT', 'REGION', 'PROVINCIA', 'COMUNA', 'AREA_C',  # Identificadores
         'geometry', 'MZ_BASE_CENSO',                        # Geometria y filtro
         'n_per', 'n_vp', 'n_hog',                           # Universos
+        'n_vp_ocupada',                                     # Viviendas ocupadas (para hacinamiento correcto)
         'pct_adulto_mayor', 'pct_infancia', 'pct_inmigrantes', 
         'pct_hacinamiento', 'pct_deficit_agua', 'pct_lena', 
         'pct_internet',
@@ -239,6 +240,9 @@ def process_data():
         'n_tenencia_propia_pagandose', # Para Hipotecados
         'n_estcivcon_anul_sep_div', # Para Club de los Ex
         'n_cise_rec_independientes', # Para Mente de Tiburón
+        # Estado Civil Completo (para "Aún Sin Anillo" con denominador correcto)
+        'n_estcivcon_soltero', 'n_estcivcon_casado', 'n_estcivcon_conviviente', 
+        'n_estcivcon_conv_civil', 'n_estcivcon_viudo',
         # Componentes de indices compuestos (para agregación)
         'n_viv_irrecuperables', 'n_tipo_viv_mediagua', 
         'n_tenencia_arrendada_sin_contrato', 'n_tenencia_cedida_familiar',
